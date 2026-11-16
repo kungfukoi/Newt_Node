@@ -957,7 +957,7 @@ app.get("/api/generation-progress", (req, res) => {
     : [...entries.values()].filter((entry) => String(entry.scope || "") === requestedScope);
   res.json({ entries: scopedEntries, serverTime: new Date().toISOString() });
 });
-const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => provider === "atlas" ? process.env.ATLAS_API_KEY : process.env.FAL_KEY, jobs: remoteVideoJobs, checkOutput: verifySeedanceVideoOutput });
+const seedanceDrafts = createSeedanceDraftStore({ directory: path.join(dataDir, "seedance-drafts"), getKey: provider => ({ atlas: process.env.ATLAS_API_KEY, fal: process.env.FAL_KEY, krea: process.env.KREA_API_KEY })[provider], jobs: remoteVideoJobs, checkOutput: verifySeedanceVideoOutput });
 registerSeedanceDraftRoutes(app, { store: seedanceDrafts, sendApiError });
 registerRemoteVideoJobRoutes(app, remoteVideoJobs);
 registerCoreRoutes(app, {
@@ -1417,6 +1417,7 @@ function buildHealthPayload() {
       nanoBanana21: true,
       seedanceDrafts: true,
       seedanceMultiProviderDrafts: true,
+      seedanceDraftFinishResolution: true,
       seedanceDraftBatchDelivery: true,
       seedanceDraftPairedFilenames: true,
       seedanceVideoEditing: true,
@@ -7505,12 +7506,12 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
   let draftMetadata = job.seedanceDraft || null;
   let draftWarning = "";
   if (settings.seedanceDraft && !draftMetadata) {
-    draftMetadata = spec.provider === "krea" ? { provider: "krea", resolution: "480p", completionSupported: false }
-      : await seedanceDrafts.recordDraft({ draftId: job.remote.draft_id, keyFingerprint: spec.credentialFingerprint, provider: spec.provider,
+    const draftId = spec.provider === "krea" ? job.requestId : job.remote.draft_id;
+    draftMetadata = await seedanceDrafts.recordDraft({ draftId, keyFingerprint: spec.credentialFingerprint, provider: spec.provider,
         startedAt: job.createdAt || body.generationSubmittedAt || Date.now(), original: spec, previewFileName: output.fileName,
         exportFileName: output.outputTarget ? output.fileName : undefined });
     if (draftMetadata) await checkpoint({ seedanceDraft: draftMetadata });
-    else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished at 1080p.`;
+    else draftWarning = `${seedanceDraftProviderName(spec.provider)} returned the preview without a draft ID. It is preserved, but cannot be finished.`;
   }
   let outpaintFinished;
   if (body.videoOutpaintContext) {
@@ -7539,8 +7540,8 @@ async function finalizeSeedanceVideo(job, checkpoint = async () => {}) {
     ...(settings.seedanceDraft && !draftMetadata ? { seedanceDraftPreviewOnly: true } : {}),
     ...([draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).length ? { warning: [draftWarning, storage.warning, outpaintFinished?.warning].filter(Boolean).join(" ") } : {}),
     ...(storage.fallback ? { storageFallback: true } : {}),
-    ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource } : {}),
-    ...(settings.seedanceDraftSource ? { seedanceDraftPreviewFileName: settings.seedanceDraftPreviewFileName,
+    ...(settings.seedanceDraftSource ? { seedanceDraftSource: settings.seedanceDraftSource,
+      seedanceDraftResolution: settings.resolution, seedanceDraftPreviewFileName: settings.seedanceDraftPreviewFileName,
       seedanceDraftDeliveryFileName: settings.seedanceDraftDeliveryFileName, seedanceDraftOutputNodeId: body.outputTargetNodeId || "" } : {}),
     ...(body.directorDialogueAudio ? { directorDialogueAudio: body.directorDialogueAudio } : {}),
     ...(body.characterVoiceReferences ? { characterVoiceReferences: body.characterVoiceReferences } : {}),
@@ -16838,6 +16839,10 @@ function estimateSeedanceCost({
   modelName = "Seedance 2.0"
 }) {
   const seedance25 = isSeedance25Model(modelName) || String(endpoint || "").includes("seedance-2.5");
+  if (seedance25 && resolution === "4k") {
+    return { amountUsd: null, currency: "USD", estimated: true, mediaType: "video", resolution, pricingStatus: "unavailable",
+      pricingBasis: "No verified Fal Seedance 2.5 4K estimate is available." };
+  }
   const outputSeconds = positiveNumber(durationSeconds) || (seedance25 && duration === "auto" ? 30 : durationToSeconds(duration));
   const inputSeconds = seedance25 && routeKind === "reference-to-video"
     ? positiveNumber(inputVideoDurationSeconds) || 0

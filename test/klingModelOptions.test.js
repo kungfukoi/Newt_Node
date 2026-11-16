@@ -63,7 +63,7 @@ test("Seedance 2.5 exposes auto and every fixed duration from 4 through 30 secon
     "auto",
     ...Array.from({ length: 27 }, (_value, index) => `${index + 4} seconds`)
   ]);
-  assert.deepEqual(seedance25ResolutionOptions, ["1080p", "720p", "480p"]);
+  assert.deepEqual(seedance25ResolutionOptions, ["4k", "1080p", "720p", "480p"]);
   assert.ok(videoModelOptions.includes(videoModelNames.seedance25));
 });
 
@@ -167,8 +167,8 @@ test("Film Director timing respects each connected model's duration limits", () 
   assert.equal(filmDirectorVideoDuration("MiniMax H3", "7", "10 seconds"), "7 seconds");
 });
 
-test("Film Director resolution never presents unsupported Seedance 2.5 output sizes", () => {
-  assert.equal(filmDirectorVideoResolution("Seedance 2.5", "4K", "720p"), "720p");
+test("Film Director resolution accepts 4K for Seedance 2.5", () => {
+  assert.equal(filmDirectorVideoResolution("Seedance 2.5", "4K", "720p"), "4k");
   assert.equal(filmDirectorVideoResolution("Seedance 2.5", "1080p", "720p"), "1080p");
   assert.equal(filmDirectorVideoResolution("Seedance 2.5", "480p", "720p"), "480p");
 });

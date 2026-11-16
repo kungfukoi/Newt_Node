@@ -271,7 +271,7 @@ function normalizedVideoRatio(value, fallback) {
 
 function normalizedSeedanceResolution(value, is25) {
   const choices = is25
-    ? ["480p", "720p", "720p-sr", "720p-esr", "1080p", "1080p-sr", "1080p-esr", "1080p-esr & 60fps", "1440p-sr", "1440p-esr", "4k-esr"]
+    ? ["480p", "720p", "720p-sr", "720p-esr", "1080p", "4k", "1080p-sr", "1080p-esr", "1080p-esr & 60fps", "1440p-sr", "1440p-esr", "4k-esr"]
     : ["480p", "720p", "720p-SR", "1080p", "1080p-SR", "1440p-SR", "4k"];
   return normalizedChoice(value, choices, "720p");
 }

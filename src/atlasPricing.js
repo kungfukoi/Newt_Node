@@ -233,6 +233,7 @@ export function estimateAtlasSeedance25Run({ endpoint, settings, video, snapshot
   const completion = endpoint === seedanceAtlasDraftCompletionEndpoint;
   const resolution = String(settings.resolution ?? "").toLowerCase();
   const references = count(settings.referenceVideoCount);
+  if (completion && resolution === "4k") return null;
   if (completion || settings.seedanceDraft && references === 0) {
     const rate = completion ? 0.592 : 0.134;
     return { ...result(endpoint, `Atlas Cloud published ${completion ? "1080p draft completion" : "480p draft preview"} benchmark per second.`),

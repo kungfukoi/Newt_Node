@@ -3,7 +3,7 @@ import { workflowContextPayload } from "../workflowContext.js";
 import { normalizeVideoGenerationResult } from "./videoModels.js";
 import { selectedSeedanceDraft, finishedSeedanceDraftState, seedanceDraftsToFinish, seedanceVersion } from "../seedanceDraft.js";
 
-export async function finishSeedanceDraft({ node, workflowContext, getCurrent, update, receiptIds, groupId, complete = nodeApi.completeSeedanceDraft }) {
+export async function finishSeedanceDraft({ node, workflowContext, getCurrent, update, receiptIds, resolution = "1080p", groupId, complete = nodeApi.completeSeedanceDraft }) {
   if (node.data.status === "running") return { status: "skipped" };
   const selected = selectedSeedanceDraft(node.data);
   if (receiptIds === undefined && selected) {
@@ -23,10 +23,10 @@ export async function finishSeedanceDraft({ node, workflowContext, getCurrent, u
   const context = workflowContextPayload(workflowContext);
   const outcomes = await Promise.allSettled(drafts.map(async (draft, index) => {
     const receiptId = draft.seedanceDraft.receiptId;
-    const result = await complete({ receiptId, ...context, nodeId: node.id, nodeTitle: node.data.title,
+    const result = await complete({ receiptId, resolution, ...context, nodeId: node.id, nodeTitle: node.data.title,
       draftCompletionDestination: true, previewFileName: draft.seedanceDraftExportFileName || draft.fileName || draft.url,
       generationGroupId: groupId, generationBatchIndex: index + 1, generationBatchTotal: drafts.length });
-    return { ...normalizeVideoGenerationResult(result, index), seedanceDraftSource: receiptId };
+    return normalizeVideoGenerationResult({ ...result, seedanceDraftSource: receiptId }, index);
   }));
   const current = getCurrent();
   if (current?.data.seedanceFinishing !== operation || current.data.status !== "running") return { status: "skipped" };

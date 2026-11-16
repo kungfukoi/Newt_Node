@@ -113,6 +113,16 @@ for (const provider of ["fal", "atlas", "krea"]) {
   });
 }
 
+for (const provider of ["fal", "atlas", "krea"]) {
+  test(provider + " Seedance requests native 4K when Draft is off", async () => {
+    const h = routeHarness(provider);
+    const response = await h.run({ seedanceDraft: false, resolution: "4k" });
+    assert.equal(response.statusCode, 202, JSON.stringify(response.body));
+    assert.equal(h.spec.input.resolution, "4k");
+    assert.equal(h.spec.settings.resolution, "4k");
+  });
+}
+
 test("Seedance still rejects tags for missing frames or unrelated inputs", async () => {
   for (const [prompt, startFrameUrls] of [["Use @start.", []], ["Use @end.", ["/outputs/start.png"]], ["Use @start-wide.", ["/outputs/start.png"]]]) {
     const h = routeHarness("atlas");
@@ -243,15 +253,24 @@ test("Atlas finalization quotes each draft stage and estimates separately when u
   assert.equal(missing.seedanceDraft, undefined); assert.match(missing.warning, /Atlas Cloud/); assert.equal(missing.video.localUrl, "/outputs/saved.mp4");
 });
 
-test("Krea finalization never creates a receipt and preview-only results survive save/load without Finish", async () => {
+test("Krea finalization records the original job ID and retains draft eligibility after save/load", async () => {
   const h = finalizerHarness();
   const result = await h.run("krea");
-  assert.equal(h.receipts.length, 0); assert.equal(result.seedanceDraft.completionSupported, false);
+  assert.equal(h.receipts[0].draftId, "request");
+  assert.equal(result.seedanceDraft.provider, "krea");
   assert.equal(h.histories[0].item.provider, "Krea"); assert.equal(result.cost.amountUsd, null);
   const item = normalizeVideoGenerationResult(result, 0);
-  const node = { data: JSON.parse(JSON.stringify({ resultItems: [item] })) };
-  assert.equal(drafts.selectedSeedanceDraft(node.data), null);
-  assert.equal((await finishSeedanceDraft({ node, complete: () => assert.fail("Preview cannot be finished") })).status, "skipped");
+  const node = { id: "video", data: JSON.parse(JSON.stringify({ resultItems: [item] })) };
+  assert.equal(drafts.selectedSeedanceDraft(node.data).seedanceDraft.receiptId, "receipt");
+  const finished = await finishSeedanceDraft({ node, resolution: "4k", getCurrent: () => node, update: patch => Object.assign(node.data, patch),
+    complete: async request => {
+      assert.equal(request.resolution, "4k");
+      assert.equal(request.receiptId, "receipt");
+      return { video: { localUrl: "/outputs/finished.mp4" }, seedanceDraftResolution: "4k" };
+    } });
+  assert.equal(finished.status, "complete");
+  assert.equal(node.data.resultItems.length, 2);
+  assert.match(finished.items[0].label, /\(4K\)$/);
 });
 
 test("Atlas media draft generation never substitutes the regular 480p price", async () => {
@@ -283,6 +302,41 @@ test("Atlas draft IDs from submission or polling survive worker restart without 
   }
 });
 
+test("Atlas and Krea submit one durable finish with the selected 4K resolution", async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), "newt-draft-4k-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const key = "original-key";
+  const calls = [];
+  const runs = new Map();
+  const jobs = { get: id => runs.get(id), create: async (id, spec) => {
+    calls.push(spec);
+    const job = { runId: id, seedanceDraftResolution: spec.settings.resolution };
+    runs.set(id, job);
+    return job;
+  } };
+  const store = createSeedanceDraftStore({ directory, getKey: () => key, jobs });
+  for (const provider of ["atlas", "krea"]) {
+    const draftId = "draft-job";
+    const draft = await store.recordDraft({ provider, draftId, keyFingerprint: providerKeyFingerprint(key),
+      original: { settings: { resolution: "480p" }, body: {} }, previewFileName: "shot_draft.mp4" });
+    const first = store.complete(draft.receiptId, { resolution: "4k" });
+    await assert.rejects(store.complete(draft.receiptId, { resolution: "1080p" }), /already starting/);
+    const accepted = await first;
+    assert.equal(await store.complete(draft.receiptId, { resolution: "4k" }), accepted);
+    await assert.rejects(store.complete(draft.receiptId), /already has a 4K finish job/);
+    const spec = calls.at(-1);
+    assert.equal(spec.provider, provider);
+    assert.equal(spec.settings.resolution, "4k");
+    assert.equal(spec.body.seedanceFinishedFileName, "shot.mp4");
+    assert.deepEqual(spec.input, provider === "atlas"
+      ? { model: drafts.seedanceAtlasDraftCompletionEndpoint, draft_id: draftId, resolution: "4k" }
+      : { draft_job_id: draftId, resolution: "4k" });
+  }
+  assert.equal(calls.length, 2);
+  assert.equal(estimateAtlasSeedance25Run({ endpoint: drafts.seedanceAtlasDraftCompletionEndpoint,
+    settings: { resolution: "4k" }, video: { duration: 5 } }), null);
+});
+
 test("receipts distinguish providers and require the original Atlas key even with Fal enabled", async t => {
   const scratch = await mkdtemp(path.join(tmpdir(), "newt-multi-receipt-"));
   t.after(() => { assert.equal(path.dirname(path.resolve(scratch)), path.resolve(tmpdir())); assert.ok(path.basename(scratch).startsWith("newt-multi-receipt-")); return rm(scratch, { recursive: true, force: true }); });
@@ -292,5 +346,8 @@ test("receipts distinguish providers and require the original Atlas key even wit
   const fal = await store.recordDraft(input), atlas = await store.recordDraft({ ...input, provider: "atlas" });
   assert.notEqual(fal.receiptId, atlas.receiptId);
   await assert.rejects(store.complete(atlas.receiptId), /original Atlas Cloud/); assert.equal(selectedProvider, "atlas");
-  await assert.rejects(store.recordDraft({ ...input, provider: "krea" }), /does not support/);
+  const krea = await store.recordDraft({ ...input, provider: "krea" });
+  assert.notEqual(krea.receiptId, atlas.receiptId);
+  await assert.rejects(store.complete(krea.receiptId), /original Krea/);
+  await assert.rejects(store.complete(fal.receiptId, { resolution: "4k" }), /Fal supports finishing drafts at 1080p/);
 });

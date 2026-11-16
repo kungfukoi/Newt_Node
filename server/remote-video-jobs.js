@@ -201,7 +201,8 @@ export async function createRemoteVideoJobs({ filePath, adapter, finalize, impor
       needsAttention: remoteVideoNeedsAttention(job), retryCount: job.retryCount || 0,
       lastError: job.lastError || null, events: job.events || [],
       timings: jobTimingDiagnostic(job, now()),
-      result: job.result || null, outputTargetNodeId: body.outputTargetNodeId || ""
+      result: job.result || null, outputTargetNodeId: body.outputTargetNodeId || "",
+      ...(job.spec.settings?.seedanceDraftSource ? { seedanceDraftResolution: job.spec.settings.resolution } : {})
     };
   }
 

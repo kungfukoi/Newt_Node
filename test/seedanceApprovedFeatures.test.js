@@ -82,7 +82,7 @@ for (const provider of ["fal", "atlas"]) test(`${provider} durable receipts dedu
   assert.equal(a.runId, b.runId);
   await jobs.step(a.runId);
   assert.equal(submits, 1); assert.equal(saves, 1);
-  assert.deepEqual(calls[0].input, provider === "atlas" ? { model: seedanceAtlasDraftCompletionEndpoint, draft_id: "provider-draft" } : { draft_id: "provider-draft", resolution: "1080p", codec: "auto" });
+  assert.deepEqual(calls[0].input, provider === "atlas" ? { model: seedanceAtlasDraftCompletionEndpoint, draft_id: "provider-draft", resolution: "1080p" } : { draft_id: "provider-draft", resolution: "1080p", codec: "auto" });
   assert.equal(calls[0].provider, provider);
   assert.equal(calls[0].body.outputTargetPath, "current-delivery");
   const target = await previewOutputTargetAsset(calls[0].body, "video", ".mp4", { rootDir: scratch });

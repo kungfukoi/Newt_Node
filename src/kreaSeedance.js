@@ -160,12 +160,12 @@ function clipUtf8End(value, maxBytes) {
 export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, durationSeconds, resolution, hasVideoReference }) {
   if (isSeedance25Model(modelName)) {
     const seconds = Math.max(4, Math.min(30, Number(durationSeconds) || 5));
-    const normalizedResolution = resolution === "480p" ? "480p" : "720p";
+    const normalizedResolution = ["480p", "1080p", "4k"].includes(resolution) ? resolution : "720p";
     const rate = normalizedResolution === "480p"
       ? hasVideoReference ? 0.0645 : 0.1078
-      : hasVideoReference ? 0.1452 : 0.2427;
-    return applyPricingQuote({
-      amountUsd: roundCurrency(seconds * rate),
+      : normalizedResolution === "720p" ? (hasVideoReference ? 0.1452 : 0.2427) : null;
+    const quote = applyPricingQuote({
+      amountUsd: rate === null ? null : roundCurrency(seconds * rate),
       currency: "USD",
       unitRateUsd: rate,
       units: seconds,
@@ -176,6 +176,7 @@ export function estimateKreaSeedanceCost({ modelName = "Seedance 2.0", speed, du
       pricingBasis: `Krea Seedance 2.5 per-second estimate (${hasVideoReference ? "with" : "without"} video reference)`,
       pricingSource: "krea-openapi-2026-08-08"
     }, "krea", kreaSeedanceEndpoint(speed, modelName), {resolution:normalizedResolution,hasVideoReference:Boolean(hasVideoReference),duration:seconds});
+    return quote.amountUsd === null ? { ...quote, pricingStatus: "unavailable", pricingBasis: "No verified price for these Krea Seedance 2.5 settings." } : quote;
   }
   const tier = speed === "fast" ? "fast" : "standard";
   const fallbackResolution = "720p";

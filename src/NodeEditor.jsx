@@ -450,7 +450,7 @@ import {
 } from "./minimaxH3.js";
 import { defaultModelProviderPreferences, normalizeModelProviderPreferences } from "./modelProviderRouting.js";
 import { imageModelReferenceLimit, imageReferenceProviderLabel } from "./imageReferenceLimits.js";
-import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint, seedanceDraftsToFinish, seedanceVersion, seedanceDraftDeliveryContext } from "./seedanceDraft.js";
+import { selectedSeedanceDraft, supportsSeedanceDraft, seedanceDraftProviderName, seedanceDraftHint, seedanceDraftsToFinish, seedanceVersion, seedanceDraftDeliveryContext, seedanceDraftFinishResolutions, seedanceDraftFinishLabel } from "./seedanceDraft.js";
 import { finishSeedanceDraft } from "./nodeRunners/seedanceDraft.js";
 import { SeedanceDraftBatchPicker } from "./components/SeedanceDraftBatchPicker.jsx";
 import { recoveredVideoOutputPatch } from "./remoteVideoRecovery.js";
@@ -7428,6 +7428,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
       ...(outputItem?.seedanceDraft ? { seedanceDraft: outputItem.seedanceDraft, seedanceDraftExportFileName: output.seedanceDraftExportFileName } : {}),
       ...(outputItem?.seedanceDraftSource ? {
         seedanceDraftSource: outputItem.seedanceDraftSource,
+        seedanceDraftResolution: outputItem.seedanceDraftResolution,
         seedanceDraftPreviewFileName: outputItem.seedanceDraftPreviewFileName,
         seedanceDraftDeliveryFileName: outputItem.seedanceDraftDeliveryFileName
       } : {}),
@@ -7608,7 +7609,7 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
         const target = outputNode ? { node: outputNode, context: outputTargetContextFromOutputNode(outputNode, current) } : null;
         token.groupId = createGenerationGroupId("seedance-finish");
         markOutputTargetRunning(target);
-        const result = await finishSeedanceDraft({ node: current, receiptIds, groupId: token.groupId,
+        const result = await finishSeedanceDraft({ node: current, receiptIds, resolution: runOptions.finishDraftResolution, groupId: token.groupId,
           workflowContext: workflowRequestContext(target?.context || {}),
           getCurrent: () => stillCurrent() ? nodesRef.current.find(item => item.id === node.id) : null,
           update: patch => updateNode(node.id, patch) });
@@ -17125,16 +17126,25 @@ function NodeBody({
       <RemoteVideoAttention node={node} onUpdate={onUpdate} />
       {selectedDraft && <div className="seedance-draft-actions">
         <small title={`Finish with the original ${draftProviderName} key before ${new Date(selectedDraft.seedanceDraft.expiresAt).toLocaleString()}`}>Draft / 480p</small>
-        <button type="button" disabled={running || (selectedDraftExpired && !completedDraft)} onClick={() => onRun(node, "finish-seedance-draft")}
-          title={completedDraft ? "Select the saved 1080p render" : `Separately billed completion using the original draft inputs; requires the original ${draftProviderName} key within seven days`}>
-          {completedDraft ? "View 1080p" : selectedDraftExpired ? "Draft expired" : showPriceSnapshot ? "Finish at 1080p (Variable cost)" : "Finish at 1080p"}
-        </button>
+        {completedDraft ? (
+          <button type="button" disabled={running} onClick={() => onRun(node, "finish-seedance-draft")}>
+            View {seedanceDraftFinishLabel(completedDraft.seedanceDraftResolution)}
+          </button>
+        ) : selectedDraftExpired ? <small>Draft expired</small> : (
+          seedanceDraftFinishResolutions(selectedDraft.seedanceDraft.provider).map(resolution => (
+            <button type="button" key={resolution} disabled={running}
+              onClick={() => onRun(node, { finishDraftReceiptIds: [selectedDraft.seedanceDraft.receiptId], finishDraftResolution: resolution })}
+              title={seedanceDraftHint(selectedDraft.seedanceDraft.provider)}>
+              Finish at {seedanceDraftFinishLabel(resolution)}{showPriceSnapshot ? " (Variable cost)" : ""}
+            </button>
+          ))
+        )}
       </div>}
       {selectedDraftMetadata?.completionSupported === false && <div className="seedance-draft-actions">
-        {selectedDraftMetadata.provider === "krea" ? <small title={seedanceDraftHint("krea")}>Krea draft / Preview only</small> : <small>Draft / Preview only</small>}
+        {selectedDraftMetadata.provider === "krea" ? <small title="This saved preview has no finish receipt.">Krea draft / Preview only</small> : <small>Draft / Preview only</small>}
       </div>}
       {finishableDrafts.length > 0 && (finishableDrafts.length > 1 || !selectedDraft || completedDraft) && (
-        <SeedanceDraftBatchPicker key={node.id} drafts={finishableDrafts} running={running} onFinish={finishDraftReceiptIds => onRun(node, { finishDraftReceiptIds })} />
+        <SeedanceDraftBatchPicker key={node.id} drafts={finishableDrafts} running={running} onFinish={(finishDraftReceiptIds, finishDraftResolution) => onRun(node, { finishDraftReceiptIds, finishDraftResolution })} />
       )}
       <button className="run-node-button" onClick={() => onRun(node)} disabled={running || node.data.characterVoiceBusy || !hasVideoPrompt || draftUnavailable || editingUnavailable}>
         {running
@@ -17589,7 +17599,7 @@ function NodeBody({
             <NodeRow label="Resolution">
               <select aria-label="Seedance resolution" value={seedanceDraft ? "480p" : node.data.resolution} disabled={seedanceDraft} onChange={(event) => onUpdate(node.id, { resolution: event.target.value })}>
                 {(isSeedance25 ? seedance25ResolutionOptions : seedanceVideoResolutionOptions).map((option) => (
-                  <option key={option}>{option}</option>
+                  <option key={option} value={option}>{option === "4k" ? "4K" : option}</option>
                 ))}
               </select>
             </NodeRow>

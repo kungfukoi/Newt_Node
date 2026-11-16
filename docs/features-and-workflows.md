@@ -67,7 +67,7 @@ Character voices or manual speaker rows → Audio Model (Dialogue and character 
 
 ### Work with drafts and long video jobs
 
-Seedance 2.5 Draft is opt-in. Fal/Atlas previews can finish at 1080p within the stored conservative seven-day deadline using the original enabled provider key. Krea drafts are preview-only; disabling Draft submits new full-resolution work. Seedance Edit Existing Video explicitly accepts one managed 4–30 second source on Fal/Atlas, not Krea. Durable tracking recovers accepted jobs after reload/restart; investigate uncertain acceptance rather than resubmitting. See [recovery](remote-video-recovery.md).
+Seedance 2.5 Draft generates a 480p preview. Choose Finish at 1080p or 4K on Krea and Atlas Cloud, or Finish at 1080p on Fal, within seven days using the original provider key. With Draft off, Krea, Atlas Cloud and Fal support direct 4K generation. Seedance Edit Existing Video accepts one managed 4–30 second source on these providers. Durable tracking recovers accepted jobs after reload/restart; investigate uncertain acceptance rather than resubmitting. See [recovery](remote-video-recovery.md).
 
 ### Arrange and edit results
 

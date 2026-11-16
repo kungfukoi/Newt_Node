@@ -31,6 +31,7 @@ const requiredHealthRoutes = [
   "seedanceDraftBatchDelivery",
   "seedanceDraftPairedFilenames",
   "seedanceMultiProviderDrafts",
+  "seedanceDraftFinishResolution",
   "seedanceVideoEditing",
   "seedanceExtend",
   "elevenLabsV4",

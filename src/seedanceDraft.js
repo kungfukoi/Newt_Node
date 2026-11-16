@@ -6,9 +6,11 @@ export const seedanceDraftSuffix = "_draft";
 export const seedanceDraftLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 export const supportsSeedanceDraft = provider => ["fal", "atlas", "krea"].includes(provider);
 export const seedanceDraftProviderName = provider => ({ fal: "Fal", atlas: "Atlas Cloud", krea: "Krea" })[provider || "fal"] || "original provider";
-export const seedanceDraftHint = provider => provider === "krea"
-  ? "Krea preview only. Its API does not offer finishing this draft at 1080p; turning Draft off starts a new full-resolution generation."
-  : "480p preview. Finish selected drafts at 1080p within seven days using the same provider and key; each stage is billed separately.";
+export const seedanceDraftFinishResolutions = provider => ["atlas", "krea"].includes(provider) ? ["1080p", "4k"] : ["1080p"];
+export const seedanceDraftFinishLabel = resolution => resolution === "4k" ? "4K" : "1080p";
+export const seedanceDraftHint = provider =>
+  "480p preview. Finish within seven days at " + seedanceDraftFinishResolutions(provider).map(seedanceDraftFinishLabel).join(" or ")
+  + " using the original provider and key. Each stage is billed separately.";
 
 export function validateSeedanceDraft({ model, seedanceDraft, provider } = {}) {
   if (seedanceDraft !== undefined && typeof seedanceDraft !== "boolean") {
@@ -16,7 +18,7 @@ export function validateSeedanceDraft({ model, seedanceDraft, provider } = {}) {
   }
   if (!seedanceDraft) return false;
   if (!isSeedance25Model(model) || !supportsSeedanceDraft(provider)) {
-    throw Object.assign(new Error("Draft mode requires Seedance 2.5 with an enabled Fal, Atlas Cloud, or Krea key. Krea supports previews only."), { status: 400 });
+    throw Object.assign(new Error("Draft mode requires Seedance 2.5 with an enabled Fal, Atlas Cloud, or Krea key. Choose a supported provider in Settings."), { status: 400 });
   }
   return true;
 }
@@ -72,7 +74,8 @@ export function seedanceVersion(item, items = []) {
   const draft = item.seedanceDraft ? item : items?.find(result => result?.seedanceDraft?.receiptId === item.seedanceDraftSource);
   const name = seedanceDraftPairStem(draft?.seedanceDraftExportFileName || item.seedanceDraftPreviewFileName || draft?.fileName)
     || draft?.label?.replace(/ \(480p\)$/, "") || "Seedance draft";
-  const quality = item.seedanceDraftSource ? "HD · 1080p" : "Draft · 480p";
+  const finishQuality = item.seedanceDraftResolution === "4k" ? "4K" : "HD · 1080p";
+  const quality = item.seedanceDraftSource ? finishQuality : "Draft · 480p";
   return { name, quality, label: `${name} (${quality})` };
 }
 

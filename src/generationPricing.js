@@ -221,6 +221,7 @@ function automaticFalKreaProvider(availability = {}) {
 
 function estimateFalSeedanceCost({ model, seconds, resolution, aspectRatio }) {
   const normalizedResolution = normalizedVideoResolution(resolution);
+  if (isSeedance25Model(model) && normalizedResolution === "4k") return null;
   const ratio = String(aspectRatio || "16:9").match(/\d+(?:\.\d+)?:\d+(?:\.\d+)?/)?.[0] || "16:9";
   const [width, height] = seedanceDimensions[normalizedResolution]?.[ratio] || seedanceDimensions[normalizedResolution]?.["16:9"] || [];
   if (!width || !height) return null;

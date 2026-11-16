@@ -17,19 +17,20 @@ async function setup(page, provider = "fal", edit = false) {
   return openFixture(page, { count: 3, settings: { falKeyConfigured: true, kreaKeyConfigured: true, atlasKeyConfigured: true, modelProviderPreferences: { seedance: provider, imageGeneration: "fal" } } });
 }
 
-for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish through the shared job and preserve outputs across reload`, async ({ page }) => {
+for (const provider of ["fal", "atlas", "krea"]) test(`${provider} draft previews finish through the shared job and preserve outputs across reload`, async ({ page }) => {
   const { errors } = await setup(page, provider);
   const video = card(page);
   let submitted, completions = 0;
+  const finishResolution = provider === "fal" ? "1080p" : "4k";
   const receipt = { receiptId: "12345678-1234-1234-1234-123456789012", draftId: "draft-provider", provider, expiresAt: "2099-10-20T00:00:00Z" };
   await page.route("**/api/node/generate-video", route => {
     submitted = route.request().postDataJSON();
     return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/draft.mp4" }, seedanceDraft: receipt } });
   });
-  const finished = { video: { localUrl: "/outputs/e2e/finished.mp4" }, seedanceDraftSource: receipt.receiptId, generationRunId: "seedance-finish-" + receipt.receiptId };
+  const finished = { video: { localUrl: "/outputs/e2e/finished.mp4" }, seedanceDraftSource: receipt.receiptId, seedanceDraftResolution: finishResolution, generationRunId: "seedance-finish-" + receipt.receiptId };
   await page.route("**/api/node/seedance-draft/complete", route => {
     completions++;
-    expect(route.request().postDataJSON().receiptId).toBe(receipt.receiptId);
+    expect(route.request().postDataJSON()).toMatchObject({ receiptId: receipt.receiptId, resolution: finishResolution });
     return route.fulfill({ status: 202, json: { job: { runId: finished.generationRunId, state: "completed", result: finished } } });
   });
   await video.getByLabel("Seedance Draft mode").click();
@@ -39,7 +40,13 @@ for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish
   await expect(video.getByRole("button", { name: /^Finish at 1080p/ })).toBeVisible();
   expect(submitted.seedanceDraft).toBe(true); expect(submitted.resolution).toBe("480p");
   expect(submitted.referenceVideoLabels).toEqual(["Source"]);
-  await video.getByRole("button", { name: /^Finish at 1080p/ }).click();
+  const finish4k = video.getByRole("button", { name: /^Finish at 4K/ });
+  if (provider === "fal") {
+    await expect(finish4k).toHaveCount(0);
+    await video.getByRole("button", { name: /^Finish at 1080p/ }).click();
+  } else {
+    await finish4k.click();
+  }
   await expect(video.locator("video").first()).toHaveAttribute("src", /finished/);
   await expect(page.locator('[data-node-card-id="preview"] video').first()).toHaveAttribute("src", /finished/);
   expect(completions).toBe(1);
@@ -49,13 +56,14 @@ for (const provider of ["fal", "atlas"]) test(`${provider} draft previews finish
   await expect(video.locator("video").first()).toHaveAttribute("src", /finished/);
   const results = await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes.find(node => node.id === "video").data.resultItems);
   expect(results).toHaveLength(2); expect(results[0].seedanceDraft.receiptId).toBe(receipt.receiptId);
+  expect(results[1].seedanceDraftResolution).toBe(finishResolution);
   expect(errors).toEqual([]);
 });
 
 test("finishing selected saved drafts labels both versions and updates the connected Output", async ({ page }) => {
   const drafts = ["shot-one", "shot-two", "shot-three"].map((name, index) => ({
     type: "video", url: `/outputs/e2e/${name}_draft.mp4`, fileName: `${name}_draft.mp4`, label: "Draft 1 (480p)",
-    seedanceDraft: { provider: "fal", receiptId: `draft-receipt-${index}`, expiresAt: "2099-10-20T00:00:00Z" }
+    seedanceDraft: { provider: index === 1 ? "fal" : "atlas", receiptId: `draft-receipt-${index}`, expiresAt: "2099-10-20T00:00:00Z" }
   }));
   const graph = {
     nodes: [
@@ -81,7 +89,7 @@ test("finishing selected saved drafts labels both versions and updates the conne
     const runId = "seedance-finish-" + body.receiptId;
     const fileName = body.previewFileName.replace("_draft.mp4", ".mp4");
     const result = { video: { localUrl: `/outputs/e2e/${fileName}`, fileName }, seedanceDraftSource: body.receiptId, generationRunId: runId,
-      seedanceDraftPreviewFileName: body.previewFileName, seedanceDraftDeliveryFileName: fileName, seedanceDraftOutputNodeId: "delivery" };
+      seedanceDraftResolution: body.resolution, seedanceDraftPreviewFileName: body.previewFileName, seedanceDraftDeliveryFileName: fileName, seedanceDraftOutputNodeId: "delivery" };
     return route.fulfill({ status: 202, json: { job: { runId, state: "completed", result } } });
   });
 
@@ -89,7 +97,12 @@ test("finishing selected saved drafts labels both versions and updates the conne
   await video.getByText("Finish multiple drafts (3 available)").click();
   await video.getByRole("checkbox", { name: "shot-one" }).check();
   await video.getByRole("checkbox", { name: "shot-three" }).check();
-  await video.getByRole("button", { name: "Finish selected at 1080p (2)" }).click();
+  const finish4k = video.getByRole("button", { name: "Finish selected at 4K (2)" });
+  await expect(finish4k).toBeVisible();
+  await video.getByRole("checkbox", { name: "shot-two" }).check();
+  await expect(video.getByRole("button", { name: /^Finish selected at 4K/ })).toHaveCount(0);
+  await video.getByRole("checkbox", { name: "shot-two" }).uncheck();
+  await finish4k.click();
   const preview = page.locator('[data-node-card-id="preview"]');
   const hdThumb = preview.getByRole("button", { name: /^Select preview \d+: shot-one$/ });
   const draftThumb = preview.getByRole("button", { name: /^Select preview \d+: shot-one \(Draft\)$/ });
@@ -97,6 +110,7 @@ test("finishing selected saved drafts labels both versions and updates the conne
   await expect(hdThumb.locator("..").locator(".preview-thumb-footer")).toHaveText("");
   await expect(draftThumb.locator("..").locator(".preview-thumb-footer")).toHaveText("Draft");
   expect(requests.map(body => body.receiptId).sort()).toEqual(["draft-receipt-0", "draft-receipt-2"]);
+  expect(requests.map(body => body.resolution)).toEqual(["4k", "4k"]);
   expect(requests.every(body => body.outputTargetPath === "deliveries" && body.outputTargetNodeId === "delivery")).toBe(true);
   expect(requests[0].generationGroupId).toBe(requests[1].generationGroupId);
 
@@ -195,7 +209,7 @@ test("Krea enables both drafts and saved edits", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("Krea drafts stay preview-only after reload and preserve normal resolution", async ({ page }) => {
+test("Legacy Krea drafts stay preview-only after reload and preserve normal resolution", async ({ page }) => {
   const { errors } = await setup(page, "krea");
   const video = card(page);
   let submitted;
@@ -204,7 +218,7 @@ test("Krea drafts stay preview-only after reload and preserve normal resolution"
     return route.fulfill({ json: { video: { localUrl: "/outputs/e2e/draft.mp4" }, seedanceDraft: { provider: "krea", resolution: "480p", completionSupported: false } } });
   });
   const toggle = video.getByLabel("Seedance Draft mode");
-  await expect(toggle).toHaveAttribute("title", /Krea preview only/);
+  await expect(toggle).toHaveAttribute("title", /1080p or 4K/);
   await toggle.click();
   await video.locator(".run-node-button").first().click();
   await expect(video.getByText("Krea draft / Preview only")).toBeVisible();
@@ -226,7 +240,7 @@ for (const provider of ["atlas", "krea"]) test(`${provider} Director draft prefe
   const { errors, requests } = await openFixture(page, { count: 1, settings: { falKeyConfigured: true, kreaKeyConfigured: true, atlasKeyConfigured: true, modelProviderPreferences: { seedance: provider } } });
   const toggle = page.getByLabel("Director Draft mode");
   await expect(toggle).toBeEnabled();
-  await expect(toggle).toHaveAttribute("title", provider === "krea" ? /Krea preview only/ : /same provider and key/);
+  await expect(toggle).toHaveAttribute("title", /1080p or 4K.*original provider and key/);
   const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data);
   await toggle.check();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("seedance-node-editor-draft-v1")).nodes[0].data.skillSeedanceDraft)).toBe(true);
