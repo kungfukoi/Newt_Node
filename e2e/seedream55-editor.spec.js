@@ -61,12 +61,19 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   await page.getByRole("button", { name: "Draw and edit with Seedream 5.5" }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
   const layers = editor.getByLabel("Layer stack", { exact: true });
+  await expect(layers).toBeVisible();
+  for (const title of ["Layer properties", "Drawing tool settings", "Save selection draft"]) {
+    await expect(editor.locator("details").filter({ has: page.locator("summary", { hasText: new RegExp("^" + title + "$", "i") }) })).not.toHaveAttribute("open", "");
+  }
+  for (const title of ["Edit Mode", "Output"]) await expect(editor.locator("details").filter({ has: page.locator("summary", { hasText: new RegExp("^" + title + "$") }) })).toHaveAttribute("open", "");
+  await expect(editor.getByRole("button", { name: "Move Layers", exact: true })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Edit Pixels", exact: true })).toBeVisible();
   const desktop = page.viewportSize();
   await page.setViewportSize({ width: 420, height: 780 });
   const sourcePsd = page.waitForEvent("download");
   await editor.locator("header").getByRole("button", { name: "Export PSD" }).click();
   expect(readPsd(await readFile(await (await sourcePsd).path()), { skipLayerImageData: true, skipCompositeImageData: true }).children).toHaveLength(1);
-  await editor.getByRole("button", { name: "Show layers" }).click();
+  await expect(editor.getByRole("button", { name: "Show layers" })).toHaveCount(0);
   await expect(layers.locator("img")).toHaveCount(1);
   await expect(editor.getByRole("button", { name: "Export PSD" })).toBeInViewport();
   await editor.getByLabel("Layers", { exact: true }).selectOption("-1");
@@ -82,8 +89,8 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   expect(submissions[0].get("resolution")).toBe("1K");
 
   await editor.getByLabel("Layers", { exact: true }).selectOption("-1");
-  await expect(editor.getByLabel("Edit method").locator("option").filter({ hasText: "Separate layers" })).toHaveCount(1);
-  await editor.getByLabel("Edit method").selectOption("layers");
+  await expect(editor.getByRole("group", { name: "Edit method" }).getByRole("button", { name: "Edit image", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await editor.getByRole("group", { name: "Edit method" }).getByRole("button", { name: "Separate layers", exact: true }).click();
   await editor.getByLabel("Maximum layers", { exact: true }).fill("12");
   await editor.getByLabel("Layer resolution").selectOption("1.5k");
   await editor.getByLabel("Recognize text layers").check();
@@ -93,6 +100,7 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   await expect(page.getByRole("dialog")).toHaveCount(1);
   const composition = editor.getByRole("group", { name: "Layer composition" });
   await expect(composition).toBeVisible();
+  await editor.getByText("Layer properties", { exact: true }).click();
   await expect(editor.getByLabel("Recognized text")).toHaveValue("OPEN");
   await expect(layers.getByRole("button", { name: "Base image", exact: true })).toBeVisible();
   await layers.getByRole("button", { name: "Show Base image", exact: true }).click();
@@ -179,7 +187,7 @@ test("Seedream 5.5 separates, edits, and exports layers in a single Image Edit w
   await expect(signThumbnail).toHaveAttribute("src", "/outputs/e2e/edited-sign.png");
   await expect(composition).toBeVisible();
   await expect(editor.getByRole("button", { name: "Edit Pixels", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await editor.getByText("Layer properties", { exact: true }).click();
+  if (!(await editor.getByText("Layer properties", { exact: true }).evaluate(summary => summary.parentElement.open))) await editor.getByText("Layer properties", { exact: true }).click();
   await expect(positionX).toHaveValue("80");
   expect(submissions[2].get("sourceUrl")).toBe("/outputs/e2e/atlas-sign.png");
   expect(submissions[2].get("preserveAlpha")).toBe("true");

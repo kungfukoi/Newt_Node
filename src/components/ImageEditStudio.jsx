@@ -84,11 +84,10 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
   const layerToolDrafts = React.useRef(new Map());
   const stackHistory = React.useRef(new Map());
   const layerHistory = layerSession && stackHistory.current.get(layerSession.key);
-  const restoreStackOnLoad = React.useRef(Boolean(restoredLayers.lastStack));
+  const restoreStackOnLoad = React.useRef(true);
   const layerDrafts = React.useRef(new Map(restoredLayers.drafts));
   const lastLayerStack = React.useRef(restoredLayers.lastStack);
   const [layerStorageError, setLayerStorageError] = React.useState("");
-  const openLayersButton = React.useRef(null);
   const versionDrafts = React.useRef(Array(restoredLayers.results.length));
   const [resultIndex, setResultIndex] = React.useState(-1);
   const [view, setView] = React.useState("result");
@@ -907,7 +906,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     restoreStackOnLoad.current = false;
     const stack = currentLayerStack();
     if (restoredLayers.consolidated) stageLayerChanges({ results: stack.items, stackKey: stack.key, draft: layerDrafts.current.get(stack.key), replaceResults: true });
-    enterLayerStack(stack);
+    const initialDraft = initializeLayerStack(stack, layerDrafts.current.get(stack.key));
+    const baseLayer = stack.items.find(entry => entry.layer.index === 0) || stack.items[0];
+    enterLayerStack(stack, { ...initialDraft, selected: baseLayer.url });
   }, [size, restoringSelections]);
   async function saveLayerStack(format) {
     if (busyRef.current || saving || !size) return;
@@ -930,6 +931,9 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     } catch (failure) { setError(failure.message || "Could not save the layer stack."); }
     finally { busyRef.current = false; setSaving(false); }
   }
+  const inspectorStack = layerSession || currentLayerStack();
+  const inspectorDraft = stackDraft || initializeLayerStack(inspectorStack, layerDrafts.current.get(inspectorStack.key));
+  const inspectorSelection = layerTarget ? selectedLayerUrls : new Set([inspectorDraft.selected]);
   const displayedImageSize = layerTarget ? compositionSize(layerSession.items, layerSession.sourceSize, layerSession.canvasSize) : reviewing && result.width && result.height ? result : size;
   const fitMargin = layerTarget ? 64 : 36;
   const scale = displayedImageSize ? Math.max(0.01, Math.min((viewport.width - fitMargin) / displayedImageSize.width, (viewport.height - fitMargin) / displayedImageSize.height)) : 1;
@@ -966,8 +970,6 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
     <header className="ies-header">
       <span><Pencil size={18} /><strong>Image Edit</strong><small>{item.label || item.fileName || "Image"}</small></span>
       <div className="ies-header-actions">
-        <button ref={openLayersButton} className="ies-open-layers" type="button" aria-label="Show layers" title="Show layers"
-          disabled={busy || saving || !size} aria-pressed={layerTarget} onClick={() => layerTarget ? rootRef.current?.querySelector('.ies-layer-row-name[data-active="true"]')?.focus() : enterLayerStack(currentLayerStack())}><Layers size={17} /><span>Layers</span></button>
         <button className="ies-export-psd" type="button" aria-label="Export PSD" title="Export PSD" disabled={busy || saving || !size}
           onClick={() => saveLayerStack("psd")}><Download size={17} /><span>Export PSD</span></button>
         <IconButton icon={Save} label="Save image to disk" onClick={saveToDisk} disabled={busy || saving || !size || namingBoxes.length > 0} />
@@ -1042,11 +1044,14 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
             onChange={event => changeModel(event.target.value)}>{imageEditModelOptions.map(option => <option key={option}>{option}</option>)}</select></label>
         </div>
         <div className="ies-sidebar-scroll">
-        {layerTarget && <LayerStackControls key={layerSession.key} stack={layerSession} draft={stackDraft} disabled={busy || saving} showProperties={showComposition}
+        {size && <LayerStackControls key={inspectorStack.key} stack={inspectorStack} draft={inspectorDraft} disabled={busy || saving}
           canUndo={Boolean(layerHistory?.past.length)} canRedo={Boolean(layerHistory?.future.length)}
-          canSeparate={Boolean(atlasAvailable && size && !busy && !saving && !modelSaving && !restoringSelections)} onSeparate={separateSelectedLayer}
-          onRemove={removeSelectedLayers} onUndo={() => restoreLayerHistory(false)} onRedo={() => restoreLayerHistory(true)}
-          selection={layerSelection} selectedUrls={selectedLayerUrls} onSelect={selectStackLayer} onDraft={changeStackDraft} onTransform={transformStackLayer} />}
+          canSeparate={Boolean(layerTarget && atlasAvailable && size && !busy && !saving && !modelSaving && !restoringSelections)} onSeparate={separateSelectedLayer}
+          onRemove={layerTarget ? removeSelectedLayers : () => {}} onUndo={() => restoreLayerHistory(false)} onRedo={() => restoreLayerHistory(true)}
+          selection={layerSelection} selectedUrls={inspectorSelection}
+          onSelect={layerTarget ? selectStackLayer : url => enterLayerStack(inspectorStack, { ...inspectorDraft, selected: url })}
+          onDraft={layerTarget ? changeStackDraft : next => enterLayerStack(inspectorStack, next)}
+          onTransform={layerTarget ? transformStackLayer : patch => enterLayerStack(inspectorStack, { ...inspectorDraft, layers: inspectorDraft.layers.map(entry => entry.url === inspectorDraft.selected ? { ...entry, ...patch } : entry) })} />}
         {!reviewing && (selectionBox || hasSelection) && <section className="ies-panel-section">
           <h3>Selection to layer</h3>
           <button type="button" disabled={busy || saving || !size} onClick={() => addSelectionToStack()}>Add to New Layer</button>
@@ -1058,7 +1063,13 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
         {!reviewing && <fieldset disabled={busy || saving || restoringSelections}>
           <details open className="ies-disclosure ies-panel-section ies-inspector-disclosure"><summary>Edit Mode</summary>
           <div className="ies-instructions-fields">
-          <label>Method<select aria-label="Edit method" disabled={boxes.length > 0 && !seedream} value={mode} onChange={(e) => { setMode(e.target.value); if (e.target.value !== "sketch") setBlank(false); if (e.target.value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}><option value="edit">Edit image</option><option value="sketch" disabled={boxes.length > 0}>Render sketch</option><option value="remove" disabled={boxes.length > 0}>Remove selected</option>{seedream && <option value="layers">Separate layers</option>}</select></label>
+          <div className="ies-methods" role="group" aria-label="Edit method">
+            {[["edit", Brush, "Edit image"], ["sketch", Pencil, "Render sketch"], ["remove", Eraser, "Remove selected"], ...(seedream ? [["layers", Layers, "Separate layers"]] : [])].map(([value, Icon, label]) => <button
+              key={value} type="button" title={label} aria-pressed={mode === value} className={mode === value ? "active" : ""}
+              disabled={boxes.length > 0 && (!seedream || value === "sketch" || value === "remove")}
+              onClick={() => { setMode(value); if (value !== "sketch") setBlank(false); if (value === "remove") { setActiveLayer("selection"); setTool("pen"); } }}
+            ><Icon size={18} aria-hidden="true" /><span>{label}</span></button>)}
+          </div>
           {mode === "sketch" && <label className="ies-checkbox"><input type="checkbox" checked={blank} onChange={(e) => { setBlank(e.target.checked); if (e.target.checked) setActiveLayer("drawing"); }} />Blank canvas</label>}
           <label>Prompt<textarea className="ies-prompt" aria-label="Edit prompt" rows={5} maxLength={16000} placeholder={layerMode ? "Name the elements to separate (optional)" : mode === "remove" ? "Additional direction (optional)" : "Describe the change..."} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
           </div></details>
@@ -1079,7 +1090,7 @@ export function ImageEditStudio({ item, workflowContext, falAvailable, kreaAvail
               <small>Scan image for objects submits a new Fal request. Your current selection is kept.</small>
             </div></details>
           </section>}
-          {!layerMode && !["boxes", "object", "hand"].includes(tool) && <details key={tool + layer} open={tool === "text"} className="ies-disclosure ies-panel-section"><summary>{layer === "selection" ? "Selection brush settings" : "Drawing tool settings"}</summary><div className="ies-section-body ies-tool-options">{layer === "drawing" && <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>}
+          {!layerMode && !["boxes", "object", "hand"].includes(tool) && <details key={tool + layer} className="ies-disclosure ies-panel-section"><summary>{layer === "selection" ? "Selection brush settings" : "Drawing tool settings"}</summary><div className="ies-section-body ies-tool-options">{layer === "drawing" && <div className="ies-color-row" aria-label="Drawing color">{imageEditColors.map((value) => <button type="button" key={value} aria-label={`Color ${value}`} title={value} aria-pressed={color === value} className={`ies-swatch ${color === value ? "active" : ""}`} style={{ background: value }} onClick={() => setColor(value)} disabled={layer === "selection"} />)}<input aria-label="Custom drawing color" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={layer === "selection"} /></div>}
           <label className="ies-slider">{tool === "text" ? "Text size" : "Brush size"}<output>{brushSize.toFixed(1)}</output><input aria-label="Brush size" type="range" min="0.2" max="12" step="0.2" value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} /></label>
           {layer === "drawing" && <label className="ies-slider">Opacity<output>{opacity}%</output><input aria-label="Drawing opacity" type="range" min="10" max="100" value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} disabled={layer === "selection"} /></label>}
           {tool === "text" && <label>Text note<textarea aria-label="Text note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>}

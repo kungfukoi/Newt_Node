@@ -443,7 +443,7 @@ function layerBlocks(layers, folders) {
   return [...blocks, ...folders.filter(folder => !grouped.has(folder.id)).map(folder => ({ folder, layers: [] }))];
 }
 
-export function LayerStackControls({ stack, draft, disabled, showProperties, canUndo, canRedo, canSeparate, onSeparate, onRemove, onUndo, onRedo, selection, selectedUrls, onSelect, onDraft, onTransform }) {
+export function LayerStackControls({ stack, draft, disabled, canUndo, canRedo, canSeparate, onSeparate, onRemove, onUndo, onRedo, selection, selectedUrls, onSelect, onDraft, onTransform }) {
   const { width, height } = compositionSize(stack.items, stack.sourceSize, stack.canvasSize);
   const { layers, selected, folders = [] } = draft;
   const blocks = layerBlocks(layers, folders);
@@ -684,7 +684,7 @@ export function LayerStackControls({ stack, draft, disabled, showProperties, can
         if (next === "auto") setListHeight(next);
         else resizeList(next);
       }}><span /></button>
-    <details className="ies-disclosure" open={showProperties}>
+    <details className="ies-disclosure">
       <summary>Layer properties</summary>
       <fieldset className="ies-transform-fields" disabled={disabled}>
       <p className="ies-layer-property-name">{name(active)}</p>

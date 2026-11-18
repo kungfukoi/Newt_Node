@@ -14,7 +14,6 @@
 .ies-window-status { flex: none; display: grid; gap: 3px; padding: 6px 12px; border-bottom: 1px solid #343434; background: #252628; color: #c5d4b5; font-size: 12px; overflow-wrap: anywhere; }
 .ies-window-status:empty { padding: 0; border: 0; }
 .ies-window-status p { margin: 0; }
-.image-edit-studio .ies-open-layers { color: #f3df73; border-color: #62562f; }
 .ies-workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(304px, 27%, 365px); flex: 1; min-height: 0; }
 .ies-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ies-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 10px 12px; border-bottom: 1px solid #343434; }
@@ -249,3 +248,8 @@
   .ies-main { grid-template-columns: 44px minmax(0, 1fr); }
   .ies-toolbar { gap: 3px; padding: 6px; }
 }
+
+.ies-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.image-edit-studio .ies-methods button { justify-content: flex-start; min-width: 0; padding: 8px; gap: 6px; font-size: 11px; text-align: left; }
+.ies-methods svg { flex-shrink: 0; }
+.image-edit-studio .ies-methods button.active:hover:not(:disabled) { background: #484329; }

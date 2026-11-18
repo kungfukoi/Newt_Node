@@ -21,6 +21,7 @@ test("new boxes name themselves, respect manual edits and save the annotated ima
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
   await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
+  await editor.getByRole("button", { name: "Edit Pixels", exact: true }).click();
   const save = editor.getByRole("button", { name: "Save image to disk", exact: true });
   await expect(save).toBeVisible();
   const firstDownload = page.waitForEvent("download"); await save.click();
@@ -28,7 +29,7 @@ test("new boxes name themselves, respect manual edits and save the annotated ima
   expect(originalDownload.suggestedFilename()).toBe("landscape.png");
   const original = await fs.readFile(await originalDownload.path());
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
-  const surface = await editor.locator(".ies-surface").boundingBox();
+  const surface = await editor.locator(".ies-layer-active > .ies-surface").boundingBox();
   async function draw(x, y) {
     await page.mouse.move(surface.x + surface.width * x, surface.y + surface.height * y); await page.mouse.down();
     await page.mouse.move(surface.x + surface.width * (x + .15), surface.y + surface.height * (y + .15)); await page.mouse.up();
@@ -77,8 +78,9 @@ test("Save Selection creates a tagged PNG output and canvas copy with more than 
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
   await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
+  await editor.getByRole("button", { name: "Edit Pixels", exact: true }).click();
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
-  const surface = await editor.locator(".ies-surface").boundingBox();
+  const surface = await editor.locator(".ies-layer-active > .ies-surface").boundingBox();
   for (let i = 0; i < 12; i++) {
     const x = .1 + i % 4 * .2, y = .15 + Math.floor(i / 4) * .25;
     await page.mouse.move(surface.x + surface.width * x, surface.y + surface.height * y);
@@ -116,8 +118,9 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await page.locator('[data-node-card-id="edit-source"] img').first().dblclick();
   await page.getByRole("button", { name: "Draw and edit with OpenAI Image 2.6 Flare", exact: true }).click();
   const editor = page.getByRole("dialog", { name: "Image Edit", exact: true });
+  await editor.getByRole("button", { name: "Edit Pixels", exact: true }).click();
   await editor.getByRole("button", { name: "Boxes", exact: true }).click();
-  const surface = await editor.locator(".ies-surface").boundingBox();
+  const surface = await editor.locator(".ies-layer-active > .ies-surface").boundingBox();
   const move = (x, y) => page.mouse.move(surface.x + surface.width * x, surface.y + surface.height * y);
   await move(.2, .2); await page.mouse.down(); await move(.4, .4); await page.mouse.up();
   await editor.getByLabel("Rename box 1", { exact: true }).dblclick();
@@ -141,7 +144,7 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   await expect(editor.getByLabel("Rotation (°)")).toHaveValue("0");
   await editor.getByRole("button", { name: "Redo stroke" }).click();
   await expect(editor.getByLabel("Rotation (°)")).toHaveValue("35");
-  await expect(editor.getByLabel("Edit method")).toBeDisabled();
+  for (const name of ["Edit image", "Render sketch", "Remove selected"]) await expect(editor.getByRole("group", { name: "Edit method" }).getByRole("button", { name, exact: true })).toBeDisabled();
   const target = editor.locator(".ies-box-target");
   const before = await target.getAttribute("points");
   const handle = await editor.getByLabel("Scale box 1", { exact: true }).last().boundingBox();
@@ -224,14 +227,14 @@ test("Boxes modes, transforms, undo, reference upload and preferred-model submis
   const resultDownload = page.waitForEvent("download");
   await editor.getByRole("button", { name: "Save image to disk", exact: true }).click();
   expect((await resultDownload).suggestedFilename()).toBe("edited.png");
-  const imageRect = await editor.locator(".ies-surface").boundingBox();
-  const transform = await editor.locator(".ies-surface").evaluate(el => el.style.transform);
+  const imageRect = await editor.locator(".ies-layer-active > .ies-surface").boundingBox();
+  const transform = await editor.locator(".ies-layer-active > .ies-surface").evaluate(el => el.style.transform);
   const grip = await divider.boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down();
   await page.mouse.move(imageRect.x + imageRect.width * .8, imageRect.y + imageRect.height * .5); await page.mouse.up();
   await expect(divider).toHaveAttribute("aria-valuenow", "80");
   expect(Number(await editor.getByLabel("Comparison split", { exact: true }).inputValue())).toBeCloseTo(80, 0);
-  expect(await editor.locator(".ies-surface").evaluate(el => el.style.transform)).toBe(transform);
+  expect(await editor.locator(".ies-layer-active > .ies-surface").evaluate(el => el.style.transform)).toBe(transform);
   await editor.getByLabel("Comparison split", { exact: true }).focus();
   await page.keyboard.press("Home"); await page.keyboard.press("ArrowRight");
   await expect(divider).toHaveAttribute("aria-valuenow", "1");
