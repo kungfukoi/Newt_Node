@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+Native dropdown menus inside nodes use the light system palette (gray background and dark text), independently of the app's dark theme. Keep native keyboard navigation and selection behavior.
+
 The Looks Catalog Filter menu includes the original source categories and a Characters option when looks carry that tag. Search can narrow the Characters results or any source category. Other locally curated descriptive tags remain searchable without adding Filter choices.
 
 The optional compact catalog is a private, movable snapshot of the indexed catalog and effective curation. It preserves stable IDs, catalog order, displayed details, example order and bytes, and managed curated image URLs. A configured compact folder opens independently of the mirror and legacy override files.

@@ -9600,8 +9600,14 @@ video.newtnode-video-fallback {
   font-weight: 780;
 }
 
-.node-row option {
-  color: #141414;
+.node-card select {
+  color-scheme: light;
+}
+
+.node-card select option,
+.node-card select optgroup {
+  color: ButtonText;
+  background-color: ButtonFace;
 }
 
 .node-row > button {
