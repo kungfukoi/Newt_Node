@@ -7443,6 +7443,12 @@ video.newtnode-video-fallback {
   background: #000;
 }
 
+/* The native controls gradient covers the full width. Avoid tiling it inside
+   the scaled canvas, where the tile edge can show as a horizontal seam. */
+.preview-stage > video::-webkit-media-controls-panel {
+  background-repeat: no-repeat;
+}
+
 .preview-stage .model-3d-viewer {
   width: 100%;
   height: max(220px, calc(240px * var(--preview-scale, 1)));
