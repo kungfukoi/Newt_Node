@@ -1,5 +1,7 @@
 # NewtNode Architecture
 
+`src/textAgentGenerationContext.js` reads bounded downstream result context from the captured graph for standalone Text Agent requests. `nodeRunners/textModels.js` submits that context through existing structured text/image/video inputs, preserving provider routing, media analysis, History and cost accounting. NodeEditor excludes this context for isolated batch entries. Image and Video Model result items retain their submitted `prompt` for later feedback; legacy items need no migration.
+
 `stylefinder-catalog.js` derives category choices from the source index and created-look metadata. It also exposes Characters when the active tags include it. Both filtering and search use tags after local curation overrides are applied.
 
 `stylefinder-compact.js` opens a relocatable snapshot selected by Shared Lookbook storage or the private `server/data/stylefinder-compact-source.json` setting. The offline packer freezes resolved list and detail data and saves raster bytes in a hash-addressed image folder. Shared compact images use catalog URLs versioned by blob so clients fetch and materialize the right image after a folder change. The private reader preserves its existing image URLs, including managed curated URLs.

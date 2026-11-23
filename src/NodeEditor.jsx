@@ -7892,6 +7892,8 @@ export default function NodeEditor({ active = true, libraryRequest, onLibraryReq
           nodeReferences,
           generationGroupId,
           mode: "agent",
+          graphNodes: runOptions.batchGroupId ? [] : graphNodes,
+          graphEdges: runOptions.batchGroupId ? [] : graphEdges,
           messages: previousMessages
         });
         const assistantMessage = createTextAgentMessage("assistant", processed.text);
@@ -23145,6 +23147,7 @@ function videoModelRequestForNode({ node, prompt, incoming, incomingByNode, proj
 }
 
 async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index, generationGroupId, batchTotal = 1 }) {
+  const request = videoModelRequestForNode({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index });
   const { response, data } = await runTrackedGeneration({
     scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
@@ -23155,14 +23158,14 @@ async function runVideoModelGeneration({ node, prompt, incoming, incomingByNode,
     batchIndex: index + 1,
     batchTotal
   }, (progress) => nodeApi.generateVideo({
-    ...videoModelRequestForNode({ node, prompt, incoming, incomingByNode, projectId, projectName, workflowContext, index }),
+    ...request,
     ...progress
   }));
   if (!response.ok) {
     throw Object.assign(new Error(`Run ${index + 1}: ${apiErrorMessage(data?.error ?? data, "Video generation failed.")}`), { generationRunId: data.generationRunId });
   }
 
-  return normalizeVideoGenerationResult(data, index);
+  return { ...normalizeVideoGenerationResult(data, index), prompt: request.prompt };
 }
 
 function wanSegmentPayloadFromNode(node, incoming = {}, index = 0, promptOverride = "") {

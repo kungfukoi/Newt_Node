@@ -66,6 +66,7 @@ export async function runImageModelGeneration({ node, prompt, aspectRatio, image
 
   const images = Array.isArray(data.images) && data.images.length ? data.images : [data.image].filter(Boolean);
   return images.map((image, imageIndex) => ({
+    prompt,
     url: image.localUrl,
     thumbnailUrl: image.thumbnailUrl || "",
     type: "image",

@@ -69,6 +69,8 @@ test("Text Agent runner sends prior turns separately and keeps connected inputs"
     sourceLabel: (source) => source?.data?.title || source?.type || "",
     promptPiecesForSource: () => [],
     mode: "agent",
+    graphNodes: [{ id: "render", type: "imageModel", data: { resultUrl: "/feedback.png" } }],
+    graphEdges: [{ from: { nodeId: "agent-1" }, to: { nodeId: "render" } }],
     messages: [
       { id: "one", role: "user", text: "Which layout is clearer?" },
       { id: "two", role: "assistant", text: "The second is clearer." }
@@ -82,5 +84,7 @@ test("Text Agent runner sends prior turns separately and keeps connected inputs"
     { role: "user", text: "Which layout is clearer?" },
     { role: "assistant", text: "The second layout, with manually added blue controls." }
   ]);
-  assert.deepEqual(requestBody.textInputs, [{ label: "Requirements", text: "Keep the controls compact." }]);
+  assert.ok(requestBody.textInputs.some(item => item.label === "Requirements" && item.text === "Keep the controls compact."));
+  assert.deepEqual(requestBody.imageInputs.map(item => item.url), ["/feedback.png"]);
+  assert.match(requestBody.textInputs[0].label, /Downstream result/);
 });

@@ -3,6 +3,7 @@ import { workflowContextPayload } from "../workflowContext.js";
 import { runTrackedGeneration } from "../generationProgressStore.js";
 import { textAgentMessagesForPrompt, textAgentRequestMessages } from "../textAgent.js";
 import { remoteVideoScope } from "../remoteVideoJobs.js";
+import { textAgentGenerationContext } from "../textAgentGenerationContext.js";
 
 export async function runTextNodeProcessing({
   node,
@@ -14,9 +15,12 @@ export async function runTextNodeProcessing({
   nodeReferences = {},
   generationGroupId = "",
   mode = "process",
-  messages = []
+  messages = [],
+  graphNodes = [],
+  graphEdges = []
 }) {
   const agentMode = mode === "agent";
+  const generationContext = agentMode ? textAgentGenerationContext(node.id, graphNodes, graphEdges) : {};
   const { response, data } = await runTrackedGeneration({
     scope: remoteVideoScope(workflowContext),
     nodeId: node.id,
@@ -31,17 +35,20 @@ export async function runTextNodeProcessing({
     messages: agentMode ? textAgentRequestMessages(textAgentMessagesForPrompt(node.data, messages)) : [],
     text: text ?? node.data.text,
     textInputs: [
+      ...(generationContext.textInputs || []),
       ...normalizedReferenceInputs(nodeReferences.textInputs),
       ...connectedTextInputItems(incoming.textIn, sourceLabel),
       ...connectedStyleInputItems(incoming.styleIn, sourceLabel, promptPiecesForSource)
     ],
     imageInputs: [
       ...connectedMediaInputItems(incoming.imageIn, "image", sourceLabel),
-      ...normalizedReferenceInputs(nodeReferences.imageInputs)
+      ...normalizedReferenceInputs(nodeReferences.imageInputs),
+      ...(generationContext.imageInputs || [])
     ],
     videoInputs: [
       ...connectedMediaInputItems(incoming.videoIn, "video", sourceLabel),
-      ...normalizedReferenceInputs(nodeReferences.videoInputs)
+      ...normalizedReferenceInputs(nodeReferences.videoInputs),
+      ...(generationContext.videoInputs || [])
     ],
     ...workflowContextPayload(workflowContext),
     nodeId: node.id,
