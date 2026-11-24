@@ -1,5 +1,7 @@
 # NewtNode Development Standards
 
+ReFrame (`cameraCoverage`) is temporarily hidden from the add-node catalog. Keep its registration and existing saved nodes, connections, media and recovery behavior available for later use.
+
 Native dropdown menus inside nodes use the light system palette (gray background and dark text), independently of the app's dark theme. Keep native keyboard navigation and selection behavior.
 
 The Looks Catalog Filter menu includes the original source categories and a Characters option when looks carry that tag. Search can narrow the Characters results or any source category. Other locally curated descriptive tags remain searchable without adding Filter choices.
